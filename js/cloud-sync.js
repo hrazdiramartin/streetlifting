@@ -6,8 +6,8 @@
 */
 
 const CLOUD_CONFIG = {
-  // ← Sem vlož svoje OAuth Client ID (vytvoř v Google Cloud Console)
-  CLIENT_ID: 'TVOJE_CLIENT_ID.apps.googleusercontent.com',
+  // ← OAuth Client ID z Google Cloud Console (projekt Streetlifting)
+  CLIENT_ID: '262182630704-nc956570f7tjodi1beaols8k0pumlnln.apps.googleusercontent.com',
   SCOPES: 'https://www.googleapis.com/auth/drive.appdata',
   FILE_NAME: 'streetlifting-data.json',
   // Auto-sync interval (ms). Změny v localStorage se uloží do Drive po této pauze.
