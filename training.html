@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#15110f">
+  <title>Streetlifting — Trénink</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar" id="topbar"></header>
+
+    <main class="main">
+      <!-- View mode: list of all workouts -->
+      <div id="workout-list-view">
+        <div class="page-header">
+          <span class="eyebrow">Historie</span>
+          <h1>Tréninky</h1>
+        </div>
+
+        <div class="flex gap-3 mb-5" style="flex-wrap: wrap;">
+          <button class="btn btn-primary" id="btn-new-workout">+ Nový trénink</button>
+          <select id="filter-type" class="full-width" style="max-width: 220px;">
+            <option value="">Všechny typy</option>
+          </select>
+        </div>
+
+        <div id="workout-list"></div>
+      </div>
+
+      <!-- Edit mode: editing one workout -->
+      <div id="workout-editor-view" style="display: none;">
+        <div class="page-header flex-between" style="flex-direction: row; align-items: flex-end;">
+          <div>
+            <span class="eyebrow" id="editor-eyebrow">Trénink</span>
+            <h1 id="editor-title">Záznam tréninku</h1>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btn-back-to-list">← Zpět</button>
+        </div>
+
+        <!-- Exercises (table nahoře) -->
+        <section class="mb-5">
+          <div class="card-header" style="margin-bottom: var(--space-3);">
+            <span class="card-title">Cviky</span>
+            <button class="btn btn-ghost btn-sm" id="btn-add-exercise" style="display: none;">+ Přidat cvik</button>
+          </div>
+
+          <div class="workout-table" id="exercise-table">
+            <div class="workout-row header">
+              <div>Cvik</div>
+              <div class="text-center">Série</div>
+              <div class="text-center">Opak.</div>
+              <div class="text-center">Váha (kg)</div>
+              <div class="text-center">RPE</div>
+              <div class="text-center">Rest</div>
+              <div class="header-record">Záznam</div>
+            </div>
+            <div id="exercise-rows"></div>
+          </div>
+        </section>
+
+        <!-- Notes -->
+        <section class="card mb-5">
+          <label for="workout-notes">Záznam / poznámky k tréninku</label>
+          <textarea id="workout-notes" rows="4" placeholder="Jak ti šel trénink, pocity, technika..."></textarea>
+        </section>
+
+        <!-- Edit details banner (dole, collapsed) -->
+        <details class="edit-details-banner mb-5" id="edit-details-banner">
+          <summary>
+            <span class="edit-details-icon">▾</span>
+            <span>Upravit detaily tréninku</span>
+            <span class="edit-details-hint">Datum • Typ • Blok</span>
+          </summary>
+          <div class="edit-details-body">
+            <div class="grid grid-2-mobile" style="grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+              <div class="field">
+                <label>Datum</label>
+                <input type="date" id="workout-date">
+              </div>
+              <div class="field">
+                <label>Typ tréninku</label>
+                <select id="workout-type"></select>
+              </div>
+            </div>
+            <div class="field" style="margin-bottom: var(--space-3);">
+              <label>Blok / týden (volitelné)</label>
+              <select id="workout-block"></select>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="btn-add-exercise-bottom">+ Přidat doplňkový cvik</button>
+          </div>
+        </details>
+
+        <!-- Actions -->
+        <div class="flex gap-3" style="flex-wrap: wrap; justify-content: space-between;">
+          <button class="btn btn-ghost" id="btn-reset-workout" style="display: none;">↺ Vrátit do plánu</button>
+          <div class="flex gap-3" style="margin-left: auto; flex-wrap: wrap;">
+            <button class="btn btn-ghost" id="btn-cancel">Zrušit</button>
+            <button class="btn btn-ghost text-warning" id="btn-skip-workout">× Nedokončeno</button>
+            <button class="btn btn-primary" id="btn-complete-workout">✓ Dokončeno</button>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <nav class="bottomnav" id="bottomnav"></nav>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/cloud-sync.js"></script>
+  <script src="js/seed.js"></script>
+  <script src="js/training.js"></script>
+</body>
+</html>

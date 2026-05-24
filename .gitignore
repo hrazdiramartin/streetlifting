@@ -1,0 +1,15 @@
+# Osobní / lokální
+.claude/
+week #5/
+data/
+
+# Systémové
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editory
+.vscode/
+.idea/
+*.swp
+*.swo
