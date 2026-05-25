@@ -217,7 +217,15 @@ function updateSyncUI(status, detail = {}) {
     btnConnect.style.display = 'none';
     btnSync.style.display = 'inline-flex';
     btnDisconnect.style.display = 'inline-flex';
-    info.textContent = detail.restored ? 'Připojeno (obnoveno ze session).' : 'Připojeno k Google Drive.';
+    info.textContent = detail.restored ? 'Připojeno (obnoveno z předchozí session).' : 'Připojeno k Google Drive.';
+  } else if (status === 'reconnect-needed') {
+    badge.textContent = 'obnovte připojení';
+    badge.className = 'badge badge-warning';
+    btnConnect.textContent = '↻ Obnovit připojení';
+    btnConnect.style.display = 'inline-flex';
+    btnSync.style.display = 'none';
+    btnDisconnect.style.display = 'inline-flex';
+    info.textContent = 'Token vypršel (po cca 1 hodině). Klikni na "Obnovit připojení" — výběr účtu bude rychlý.';
   } else if (status === 'syncing') {
     badge.textContent = detail.direction === 'pull' ? 'stahuji…' : 'nahrávám…';
     badge.className = 'badge badge-accent';

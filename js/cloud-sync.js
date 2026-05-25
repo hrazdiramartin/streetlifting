@@ -17,7 +17,15 @@ const CLOUD_CONFIG = {
 };
 
 const CloudSync = (() => {
+  const CONNECTED_KEY = 'sl_drive_connected';
+  const HINT_EMAIL_KEY = 'sl_drive_hint';
+  const TOKEN_KEY = 'sl_drive_token';
+  const INTERNAL_KEYS = new Set([
+    CONNECTED_KEY, HINT_EMAIL_KEY, TOKEN_KEY,
+    'sl_seed_version', '__sl_last_modified',
+  ]);
   let accessToken = null;
+  let tokenExpiresAt = 0;
   let tokenClient = null;
   let fileId = null;
   let lastLocalSave = 0;
@@ -30,6 +38,39 @@ const CloudSync = (() => {
   function onStatus(cb) { listeners.push(cb); }
   function emit(status, detail = {}) {
     listeners.forEach(cb => cb(status, detail));
+  }
+
+  // --- Token persistence (localStorage = přežije zavření prohlížeče) ---
+  function saveTokenToStorage(token, expiresIn) {
+    accessToken = token;
+    tokenExpiresAt = Date.now() + (expiresIn - 60) * 1000; // -60s safety buffer
+    try {
+      localStorage.setItem(TOKEN_KEY, JSON.stringify({ t: token, e: tokenExpiresAt }));
+    } catch (e) { /* ignore */ }
+  }
+
+  function loadTokenFromStorage() {
+    try {
+      const raw = localStorage.getItem(TOKEN_KEY);
+      if (!raw) return false;
+      const data = JSON.parse(raw);
+      if (!data.t || Date.now() >= data.e) {
+        localStorage.removeItem(TOKEN_KEY);
+        return false;
+      }
+      accessToken = data.t;
+      tokenExpiresAt = data.e;
+      return true;
+    } catch (e) {
+      localStorage.removeItem(TOKEN_KEY);
+      return false;
+    }
+  }
+
+  function clearTokenStorage() {
+    accessToken = null;
+    tokenExpiresAt = 0;
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
   }
 
   // --- Google Identity Services init ---
@@ -54,23 +95,58 @@ const CloudSync = (() => {
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: CLOUD_CONFIG.CLIENT_ID,
       scope: CLOUD_CONFIG.SCOPES,
-      callback: (resp) => {
+      // Callback se overridne v requestToken()
+      callback: () => {},
+    });
+  }
+
+  /**
+   * Získá platný access token. Pokud aktuální vypršel, požádá Google o nový.
+   * @param {boolean} interactive  true = pokud potřeba, ukáže consent popup. false = pouze tichý refresh.
+   */
+  function requestToken(interactive = false) {
+    return new Promise((resolve, reject) => {
+      // Token ještě platí (s rezervou 60 s)
+      if (accessToken && tokenExpiresAt - Date.now() > 60000) return resolve(accessToken);
+      try {
+        initTokenClient();
+      } catch (e) {
+        return reject(e);
+      }
+      tokenClient.callback = (resp) => {
         if (resp.error) {
-          emit('error', { message: resp.error });
-          return;
+          if (!interactive) {
+            // Tichý refresh selhal — neodpojuj, jen drž flag a čekej na user gesture
+            emit('reconnect-needed');
+          } else {
+            emit('error', { message: resp.error });
+          }
+          return reject(new Error(resp.error));
         }
-        accessToken = resp.access_token;
-        sessionStorage.setItem('__sl_drive_token', accessToken);
-        emit('connected');
-        // Hned po připojení: stáhnout vzdálená data + nastartovat polling
-        syncFromCloud().then(() => startAutoSync());
-      },
+        const expiresIn = parseInt(resp.expires_in || '3600', 10);
+        saveTokenToStorage(resp.access_token, expiresIn);
+        localStorage.setItem(CONNECTED_KEY, '1');
+        resolve(accessToken);
+      };
+      const prompt = interactive ? 'consent' : '';
+      const opts = { prompt };
+      // Optional: hint který účet použít (urychluje tichý refresh)
+      const hint = localStorage.getItem(HINT_EMAIL_KEY);
+      if (hint && !interactive) opts.login_hint = hint;
+      tokenClient.requestAccessToken(opts);
     });
   }
 
   // --- Drive API calls ---
-  async function driveFetch(path, options = {}) {
-    if (!accessToken) throw new Error('Není přihlášeno');
+  async function driveFetch(path, options = {}, _retry = false) {
+    if (!accessToken) {
+      // Zkus tichý refresh — pokud máme persistent flag
+      if (localStorage.getItem(CONNECTED_KEY)) {
+        await requestToken(false);
+      } else {
+        throw new Error('Není přihlášeno');
+      }
+    }
     const url = path.startsWith('http') ? path : `https://www.googleapis.com${path}`;
     const res = await fetch(url, {
       ...options,
@@ -80,13 +156,18 @@ const CloudSync = (() => {
       },
     });
     if (!res.ok) {
-      const text = await res.text();
-      // Token expired? trigger re-auth
-      if (res.status === 401) {
+      // Token expired? Zkus tichý refresh a retry (jen jednou)
+      if (res.status === 401 && !_retry) {
         accessToken = null;
-        sessionStorage.removeItem('__sl_drive_token');
-        emit('disconnected', { reason: 'token-expired' });
+        try {
+          await requestToken(false);
+          return driveFetch(path, options, true);
+        } catch (e) {
+          emit('disconnected', { reason: 'token-expired' });
+          throw e;
+        }
       }
+      const text = await res.text();
       throw new Error(`Drive API ${res.status}: ${text}`);
     }
     return res;
@@ -141,17 +222,19 @@ const CloudSync = (() => {
   async function connect() {
     try {
       await ensureGisLoaded();
-      initTokenClient();
-      tokenClient.requestAccessToken({ prompt: 'consent' });
+      await requestToken(true); // interactive consent
+      emit('connected');
+      await syncFromCloud();
+      startAutoSync();
     } catch (e) {
       emit('error', { message: e.message });
     }
   }
 
   function disconnect() {
-    accessToken = null;
+    clearTokenStorage();
     fileId = null;
-    sessionStorage.removeItem('__sl_drive_token');
+    localStorage.removeItem(CONNECTED_KEY);
     stopAutoSync();
     emit('disconnected', { reason: 'user' });
   }
@@ -219,15 +302,15 @@ const CloudSync = (() => {
       const origSet = Storage.set.bind(Storage);
       Storage.set = function(key, value) {
         const r = origSet(key, value);
-        // Sync klíče, ale ne meta klíče
-        if (key.startsWith('sl_') && key !== 'sl_seed_version') scheduleSync();
+        // Sync uživatelské klíče, ale ne meta/interní
+        if (key.startsWith('sl_') && !INTERNAL_KEYS.has(key)) scheduleSync();
         return r;
       };
       Storage.__patched = true;
     }
     // Poslouchej storage události (z jiných tabů ve stejném prohlížeči)
     window.addEventListener('storage', (e) => {
-      if (e.key && e.key.startsWith('sl_')) scheduleSync();
+      if (e.key && e.key.startsWith('sl_') && !INTERNAL_KEYS.has(e.key)) scheduleSync();
     });
     // Polling: každých POLL_MS sekund kontroluj remote změny
     if (CLOUD_CONFIG.POLL_MS > 0) {
@@ -244,21 +327,48 @@ const CloudSync = (() => {
     clearTimeout(debounceTimer);
   }
 
-  /** Při startu zkusit obnovit token a auto-sync. */
+  /**
+   * Při startu zkusit obnovit připojení:
+   * 1. Pokud máme platný uložený token (do 1h) — použij ho přímo (žádný popup)
+   * 2. Pokud token expiroval, ale dříve byl uživatel připojen — zkus tichý refresh
+   *    (silent ok v některých prohlížečích; pokud selže, zobraz "obnovit připojení" UI)
+   */
   async function tryRestore() {
-    const t = sessionStorage.getItem('__sl_drive_token');
-    if (!t) return false;
-    accessToken = t;
+    // Případ 1: máme uložený platný token
+    if (loadTokenFromStorage()) {
+      try {
+        // Ověř, že token ještě funguje
+        await driveFetch('/drive/v3/about?fields=user');
+        emit('connected', { restored: true });
+        await syncFromCloud();
+        startAutoSync();
+        return true;
+      } catch (e) {
+        // Token byl v storage, ale Drive ho odmítl — pokračuj na case 2
+        clearTokenStorage();
+      }
+    }
+
+    // Případ 2: token expiroval/neexistuje, ale flag říká, že jsme byli připojeni
+    if (!localStorage.getItem(CONNECTED_KEY)) return false;
     try {
-      // Test, jestli token funguje
-      await driveFetch('/drive/v3/about?fields=user');
+      await ensureGisLoaded();
+      await requestToken(false); // silent refresh
       emit('connected', { restored: true });
+      // Ulož hint email pro příště
+      try {
+        const res = await driveFetch('/drive/v3/about?fields=user');
+        const data = await res.json();
+        if (data.user && data.user.emailAddress) {
+          localStorage.setItem(HINT_EMAIL_KEY, data.user.emailAddress);
+        }
+      } catch (e) { /* nepodstatné */ }
       await syncFromCloud();
       startAutoSync();
       return true;
     } catch (e) {
-      accessToken = null;
-      sessionStorage.removeItem('__sl_drive_token');
+      // Tichý refresh selhal — UI dostane 'reconnect-needed' (z requestToken)
+      // Uživatel musí kliknout "Obnovit" pro popup výběru účtu.
       return false;
     }
   }
